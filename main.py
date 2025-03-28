@@ -1,68 +1,201 @@
-import pandas as pd
+#!/usr/bin/env python3
+"""
+Advanced Sales and Revenue Prediction Project
+
+This script demonstrates an advanced approach to forecasting revenue
+using two models:
+  1. A multivariate Linear Regression model with feature engineering.
+  2. A univariate ARIMA model for time series forecasting.
+
+The script includes data preprocessing, cross validation, model evaluation,
+and detailed visualizations.
+
+Author: Muneeb
+Date: 2025-03-28
+"""
+
+import logging
+import sys
+import os
+import warnings
+from datetime import timedelta
+
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+import seaborn as sns
+
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 
-# 1. Load Data
-try:
-    data = pd.read_csv('sales_data.csv', parse_dates=['Date'])
-except FileNotFoundError:
-    # If the CSV file doesn't exist, create a synthetic dataset for demonstration.
-    print("CSV file not found. Creating synthetic data...")
-    dates = pd.date_range(start="2022-01-01", periods=100, freq='W')
-    # Generate synthetic revenue data with an upward trend and some noise.
-    revenue = np.linspace(1000, 5000, num=100) + np.random.normal(0, 300, 100)
-    data = pd.DataFrame({"Date": dates, "Revenue": revenue})
+from statsmodels.tsa.arima.model import ARIMA
 
-# 2. Data Preprocessing
-data.sort_values('Date', inplace=True)
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+warnings.filterwarnings("ignore")
 
-data['Date_ordinal'] = data['Date'].map(pd.Timestamp.toordinal)
+class SalesRevenuePredictor:
+    def __init__(self, csv_path='sales_data.csv'):
+        self.csv_path = csv_path
+        self.data = None
+        self.linear_model = None
+        self.arima_model = None
 
-# Display the first few rows to verify preprocessing steps.
-print("Data preview:")
-print(data.head())
+    def load_and_preprocess_data(self):
+        """
+        Load data from CSV and perform preprocessing:
+          - Parse dates and sort data.
+          - Handle missing values.
+          - Create new date-based features.
+        """
+        try:
+            self.data = pd.read_csv(self.csv_path, parse_dates=['Date'])
+            logging.info(f"Data loaded from {self.csv_path}")
+        except FileNotFoundError:
+            logging.warning("CSV file not found. Creating synthetic dataset...")
+            dates = pd.date_range(start="2022-01-01", periods=150, freq='W')
+            revenue = np.linspace(2000, 10000, num=150) + np.random.normal(0, 500, 150)
+            self.data = pd.DataFrame({"Date": dates, "Revenue": revenue})
+        
+        # Sort and reset index
+        self.data.sort_values('Date', inplace=True)
+        self.data.reset_index(drop=True, inplace=True)
 
-# 3. Feature Selection and Train-Test Split
-X = data['Date_ordinal'].values.reshape(-1, 1)
-y = data['Revenue'].values
+        # Handle missing values if any
+        self.data['Revenue'].fillna(method='ffill', inplace=True)
 
-# Split the dataset into training and testing sets (80% training, 20% testing).
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        # Feature engineering: extract date features
+        self.data['Date_ordinal'] = self.data['Date'].map(pd.Timestamp.toordinal)
+        self.data['Year'] = self.data['Date'].dt.year
+        self.data['Month'] = self.data['Date'].dt.month
+        self.data['Day'] = self.data['Date'].dt.day
+        self.data['Weekday'] = self.data['Date'].dt.weekday
 
-# 4. Build and Train the Linear Regression Model
-model = LinearRegression()
-model.fit(X_train, y_train)
+        logging.info("Data preprocessing complete. Data preview:")
+        logging.info(self.data.head())
+    
+    def train_linear_regression(self):
+        """
+        Train a multivariate linear regression model using date features.
+        Uses Date_ordinal, Month, and Weekday as features.
+        """
+        features = ['Date_ordinal', 'Month', 'Weekday']
+        X = self.data[features].values
+        y = self.data['Revenue'].values
 
-# Predict the revenue for test set
-y_pred = model.predict(X_test)
+        # TimeSeriesSplit for cross-validation
+        tscv = TimeSeriesSplit(n_splits=5)
+        lr = LinearRegression()
 
-# Calculate model performance using Mean Squared Error (MSE)
-mse = mean_squared_error(y_test, y_pred)
-print(f"\nMean Squared Error: {mse:.2f}")
+        cv_scores = cross_val_score(lr, X, y, cv=tscv, scoring='neg_mean_squared_error')
+        logging.info(f"Linear Regression CV MSE: {-np.mean(cv_scores):.2f} (avg over 5 folds)")
 
-# 5. Visualization
-plt.figure(figsize=(10, 6))
-plt.scatter(data['Date'], y, color='blue', label='Actual Revenue', alpha=0.6)
+        # Fit model on entire dataset
+        lr.fit(X, y)
+        self.linear_model = lr
+        self.data['LR_Predicted'] = lr.predict(X)
 
-# For a smooth line, predict across the full date range
-all_dates = pd.date_range(start=data['Date'].min(), end=data['Date'].max(), freq='D')
-all_dates_ordinal = all_dates.map(pd.Timestamp.toordinal).values.reshape(-1, 1)
-all_predictions = model.predict(all_dates_ordinal)
+        # Evaluation metrics on training set
+        mse = mean_squared_error(y, self.data['LR_Predicted'])
+        mae = mean_absolute_error(y, self.data['LR_Predicted'])
+        r2 = r2_score(y, self.data['LR_Predicted'])
+        logging.info(f"Linear Regression Metrics: MSE={mse:.2f}, MAE={mae:.2f}, R2={r2:.2f}")
+    
+    def train_arima(self, order=(2,1,2)):
+        """
+        Train an ARIMA model on the revenue time series.
+        The order can be adjusted based on analysis.
+        """
+        ts_data = self.data.set_index('Date')['Revenue']
+        # Fit the ARIMA model
+        self.arima_model = ARIMA(ts_data, order=order).fit()
+        logging.info("ARIMA model trained.")
+        # Add in-sample predictions and residuals for evaluation
+        self.data['ARIMA_Fitted'] = self.arima_model.fittedvalues
+        residuals = ts_data - self.arima_model.fittedvalues
+        mse = np.mean(np.square(residuals))
+        logging.info(f"ARIMA Model In-sample MSE: {mse:.2f}")
+    
+    def visualize_models(self):
+        """
+        Visualize actual revenue vs. predictions from Linear Regression and ARIMA.
+        Also plot residuals and forecast future revenue.
+        """
+        plt.figure(figsize=(14, 6))
+        plt.plot(self.data['Date'], self.data['Revenue'], label='Actual Revenue', marker='o', color='black')
 
-plt.plot(all_dates, all_predictions, color='red', linewidth=2, label='Predicted Revenue Trend')
-plt.xlabel('Date')
-plt.ylabel('Revenue')
-plt.title('Sales and Revenue Prediction')
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.show()
+        # Plot Linear Regression predictions
+        plt.plot(self.data['Date'], self.data['LR_Predicted'], label='Linear Regression Prediction', color='blue', linewidth=2)
 
-# 6. Future Revenue Prediction
-future_date = data['Date'].max() + pd.Timedelta(days=30)
-future_date_ordinal = np.array([[future_date.toordinal()]])
-future_prediction = model.predict(future_date_ordinal)
-print(f"\nPredicted Revenue for {future_date.date()}: ${future_prediction[0]:.2f}")
+        # Plot ARIMA fitted values
+        plt.plot(self.data['Date'], self.data['ARIMA_Fitted'], label='ARIMA Fitted', color='red', linestyle='--', linewidth=2)
+        plt.xlabel('Date')
+        plt.ylabel('Revenue')
+        plt.title('Sales and Revenue Prediction: Actual vs. Model Predictions')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+        # Residual Analysis for Linear Regression
+        plt.figure(figsize=(12, 4))
+        residuals_lr = self.data['Revenue'] - self.data['LR_Predicted']
+        sns.histplot(residuals_lr, kde=True, color='blue')
+        plt.title('Residuals Distribution - Linear Regression')
+        plt.xlabel('Residual')
+        plt.show()
+
+        # Residual Analysis for ARIMA
+        plt.figure(figsize=(12, 4))
+        ts_data = self.data.set_index('Date')['Revenue']
+        residuals_arima = ts_data - self.arima_model.fittedvalues
+        sns.histplot(residuals_arima, kde=True, color='red')
+        plt.title('Residuals Distribution - ARIMA Model')
+        plt.xlabel('Residual')
+        plt.show()
+    
+    def forecast_future(self, days=60):
+        """
+        Forecast future revenue using the ARIMA model.
+        Plots the forecast along with confidence intervals.
+        """
+        if self.arima_model is None:
+            logging.error("ARIMA model is not trained yet.")
+            return
+        
+        last_date = self.data['Date'].max()
+        forecast = self.arima_model.get_forecast(steps=days)
+        forecast_index = pd.date_range(start=last_date + timedelta(days=1), periods=days, freq='D')
+        forecast_mean = forecast.predicted_mean
+        conf_int = forecast.conf_int()
+
+        plt.figure(figsize=(14, 6))
+        plt.plot(self.data['Date'], self.data['Revenue'], label='Historical Revenue', color='black')
+        plt.plot(forecast_index, forecast_mean, label='Forecasted Revenue (ARIMA)', color='green', linewidth=2)
+        plt.fill_between(forecast_index, conf_int.iloc[:, 0], conf_int.iloc[:, 1], color='green', alpha=0.3,
+                         label='Confidence Interval')
+        plt.xlabel('Date')
+        plt.ylabel('Revenue')
+        plt.title('Future Revenue Forecast')
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+        future_date = forecast_index[-1]
+        logging.info(f"Forecast complete. Revenue prediction for {future_date.date()}: {forecast_mean.iloc[-1]:.2f}")
+    
+    def run_all(self):
+        """
+        Run the full pipeline: data loading, training both models, visualization, and forecasting.
+        """
+        self.load_and_preprocess_data()
+        self.train_linear_regression()
+        self.train_arima(order=(2,1,2))
+        self.visualize_models()
+        self.forecast_future(days=60)
+
+if __name__ == "__main__":
+    predictor = SalesRevenuePredictor(csv_path='sales_data.csv')
+    predictor.run_all()

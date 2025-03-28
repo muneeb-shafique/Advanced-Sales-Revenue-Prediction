@@ -12,6 +12,13 @@
       This repository presents a state-of-the-art solution for forecasting sales and revenue by integrating multivariate linear regression with ARIMA time series models. Designed for data science professionals and advanced students, the project emphasizes rigorous data preprocessing, modular architecture, and comprehensive visualizations, providing an excellent resource for accurate revenue predictions and in-depth analytical research.
     </p>
   </section>
+
+  <!-- Adding the GIF Section -->
+  <section id="gif">
+    <h2>Project Demo GIF</h2>
+    <p>See a quick demo of the project's functionality below:</p>
+    <img src="Preview/demo.gif" alt="Project Demo GIF" width="560"/>
+  </section>
   
   <section id="features">
     <h2>Key Features</h2>
@@ -83,7 +90,7 @@ pip install pandas matplotlib seaborn scikit-learn statsmodels
 python advanced_sales_revenue_prediction.py
     </pre>
   </section>
-  
+
   <section id="visualizations">
     <h2>Visualizations and Analysis</h2>
     <p>
@@ -98,7 +105,7 @@ python advanced_sales_revenue_prediction.py
       <dd>Forecast plots that display the projected future revenue along with confidence intervals to measure forecast uncertainty.</dd>
     </dl>
   </section>
-  
+
   <section id="conclusion">
     <h2>Conclusion</h2>
     <p>

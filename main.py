@@ -8,10 +8,10 @@ using two models:
   2. A univariate ARIMA model for time series forecasting.
 
 The script includes data preprocessing, cross validation, model evaluation,
-and detailed visualizations.
+and detailed visualizations with added hyperparameter tuning for ARIMA.
 
 Author: Muneeb
-Date: 2025-03-28
+Date: 2025-04-01
 """
 
 import logging
@@ -19,17 +19,17 @@ import sys
 import os
 import warnings
 from datetime import timedelta
-
+from itertools import product
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
-
 from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tools.eval_measures import rmse
+from sklearn.model_selection import train_test_split
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -110,12 +110,31 @@ class SalesRevenuePredictor:
         ts_data = self.data.set_index('Date')['Revenue']
         # Fit the ARIMA model
         self.arima_model = ARIMA(ts_data, order=order).fit()
-        logging.info("ARIMA model trained.")
+        logging.info(f"ARIMA model trained with order {order}.")
         # Add in-sample predictions and residuals for evaluation
         self.data['ARIMA_Fitted'] = self.arima_model.fittedvalues
         residuals = ts_data - self.arima_model.fittedvalues
         mse = np.mean(np.square(residuals))
         logging.info(f"ARIMA Model In-sample MSE: {mse:.2f}")
+    
+    def tune_arima(self):
+        """
+        Tune ARIMA parameters using grid search.
+        Searches over a range of p, d, q values to find the optimal model.
+        """
+        p = d = q = range(0, 3)
+        best_aic = float('inf')
+        best_order = None
+        for param in product(p, d, q):
+            try:
+                model = ARIMA(self.data.set_index('Date')['Revenue'], order=param).fit()
+                if model.aic < best_aic:
+                    best_aic = model.aic
+                    best_order = param
+            except:
+                continue
+        logging.info(f"Best ARIMA order found: {best_order} with AIC: {best_aic}")
+        return best_order
     
     def visualize_models(self):
         """
@@ -154,7 +173,7 @@ class SalesRevenuePredictor:
         plt.title('Residuals Distribution - ARIMA Model')
         plt.xlabel('Residual')
         plt.show()
-    
+
     def forecast_future(self, days=60):
         """
         Forecast future revenue using the ARIMA model.
@@ -185,14 +204,17 @@ class SalesRevenuePredictor:
 
         future_date = forecast_index[-1]
         logging.info(f"Forecast complete. Revenue prediction for {future_date.date()}: {forecast_mean.iloc[-1]:.2f}")
-    
+
     def run_all(self):
         """
         Run the full pipeline: data loading, training both models, visualization, and forecasting.
         """
         self.load_and_preprocess_data()
         self.train_linear_regression()
-        self.train_arima(order=(2,1,2))
+
+        best_arima_order = self.tune_arima()
+        self.train_arima(order=best_arima_order)
+
         self.visualize_models()
         self.forecast_future(days=60)
 
